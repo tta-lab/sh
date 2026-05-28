@@ -73,6 +73,7 @@ func ScanMsgBlocks(src []byte, baseOffset uint) (blocks []*MessageBlock, clean [
 	var kwDepth int // keyword-body depth (then/do → ++, fi/done → --)
 	heredocDelim := ""
 	heredocStripTabs := false
+	heredocPending := false // true when << was seen but ctx not yet msgHeredoc
 	var line, col uint = 1, 1
 	startOk := true
 
@@ -82,12 +83,17 @@ func ScanMsgBlocks(src []byte, baseOffset uint) (blocks []*MessageBlock, clean [
 		if b == '\n' {
 			line++
 			col = 1
+			if heredocPending {
+				ctx = msgHeredoc
+				heredocPending = false
+			}
 			if heredocDelim != "" && matchHeredocDelim(src, i+1, heredocDelim, heredocStripTabs) {
 				delimLen := len(heredocDelim)
 				heredocDelim = ""
 				heredocStripTabs = false
 				ctx = msgTop
 				i += 1 + delimLen + 1 // newline + delimiter + trailing newline
+				line++                 // the skipped trailing newline advances to the next line
 				startOk = true
 				continue
 			}
@@ -174,7 +180,7 @@ func ScanMsgBlocks(src []byte, baseOffset uint) (blocks []*MessageBlock, clean [
 						}
 						heredocDelim = d
 						heredocStripTabs = stripTabs
-						ctx = msgHeredoc
+						heredocPending = true
 						i = j
 						startOk = false
 						continue
