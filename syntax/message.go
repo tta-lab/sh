@@ -8,21 +8,8 @@ import (
 	"strings"
 )
 
-// MessageBlock represents a Lenos top-level message block.
-//
-// Message blocks are recognized only at the top level of a shell file,
-// outside strings, comments, heredocs, command substitutions, and
-// control-flow bodies.
-//
-// Valid forms:
-//
-//	m"Done."
-//	m#"body with "quotes"#"
-//	m##"body with "# delimiter"##
-//	m(neil)"addressed message"
-//	m(neil)#"addressed with hashes"#
 type MessageBlock struct {
-	Mpos  Pos
+	Mpos   Pos
 	Target string
 	Hashes int
 	Quote  Pos
@@ -58,10 +45,10 @@ const (
 	msgBckQuote
 	msgDollarSingle
 	msgDollarDouble
+	msgHeredoc
 )
 
-// scanMsgBlocks extracts Lenos message blocks from source.
-func scanMsgBlocks(src []byte) (blocks []*MessageBlock, clean []byte, err error) {
+func scanMsgBlocks(src []byte, baseOffset uint) (blocks []*MessageBlock, clean []byte, err error) {
 	if len(src) == 0 {
 		return nil, src, nil
 	}
@@ -69,17 +56,36 @@ func scanMsgBlocks(src []byte) (blocks []*MessageBlock, clean []byte, err error)
 	copy(clean, src)
 
 	var ctx msgCtxState
+	var depth int
+	heredocDelim := ""
 	var line, col uint = 1, 1
 	startOk := true
 
 	for i := 0; i < len(src); {
 		b := src[i]
+
 		if b == '\n' {
 			line++
 			col = 1
+			if heredocDelim != "" && matchHeredocDelim(src, i+1, heredocDelim) {
+				heredocDelim = ""
+				ctx = msgTop
+				i += 1 + len(heredocDelim) + 1
+				line++
+				col = 1
+				startOk = true
+				continue
+			}
 			startOk = true
+			i++
+			continue
 		} else {
 			col++
+		}
+
+		if ctx == msgHeredoc {
+			i++
+			continue
 		}
 
 		switch ctx {
@@ -96,6 +102,22 @@ func scanMsgBlocks(src []byte) (blocks []*MessageBlock, clean []byte, err error)
 				startOk = false
 			case '#':
 				ctx = msgComment
+				startOk = false
+			case '(':
+				depth++
+				startOk = false
+			case ')':
+				if depth > 0 {
+					depth--
+				}
+				startOk = false
+			case '{':
+				depth++
+				startOk = false
+			case '}':
+				if depth > 0 {
+					depth--
+				}
 				startOk = false
 			case '$':
 				if i+1 < len(src) {
@@ -114,11 +136,38 @@ func scanMsgBlocks(src []byte) (blocks []*MessageBlock, clean []byte, err error)
 				} else {
 					startOk = false
 				}
-			case ';', '&', '|', '\n':
+			case '\n':
 				startOk = true
+			case ';', '&':
+				startOk = true // end of statement
+			case '<':
+				if i+1 < len(src) && src[i+1] == '<' {
+					j := i + 2
+					if j < len(src) && src[j] == '-' {
+						j++
+					}
+					delimStart := j
+					for j < len(src) && src[j] != '\n' && src[j] != ' ' && src[j] != '\t' {
+						j++
+					}
+					if j > delimStart {
+						d := string(src[delimStart:j])
+						if len(d) >= 2 && (d[0] == '"' || d[0] == '\'') && d[len(d)-1] == d[0] {
+							d = d[1 : len(d)-1]
+						}
+						heredocDelim = d
+						ctx = msgHeredoc
+						i = j
+						startOk = false
+						continue
+					}
+				}
+				startOk = false
+			case ' ', '\t', '\r':
 			default:
-				if b == 'm' && startOk {
-					block, consumed, mErr := tryParseMsgBlock(src[i:], line, col-1)
+				if b == 'm' && startOk && depth == 0 {
+					offset := baseOffset + uint(i)
+					block, consumed, mErr := tryParseMsgBlock(src[i:], offset, line, col-1)
 					if mErr != nil {
 						return blocks, clean, mErr
 					}
@@ -193,26 +242,43 @@ func scanMsgBlocks(src []byte) (blocks []*MessageBlock, clean []byte, err error)
 	return blocks, clean, nil
 }
 
-// tryParseMsgBlock attempts to parse a message block at src[0].
-func tryParseMsgBlock(src []byte, line, col uint) (*MessageBlock, int, error) {
+func matchHeredocDelim(src []byte, pos int, delim string) bool {
+	end := pos + len(delim)
+	if end > len(src) {
+		return false
+	}
+	if string(src[pos:end]) != delim {
+		return false
+	}
+	return end >= len(src) || src[end] == '\n'
+}
+
+func tryParseMsgBlock(src []byte, offset uint, line, col uint) (*MessageBlock, int, error) {
 	if len(src) == 0 || src[0] != 'm' {
 		return nil, 0, nil
 	}
+	mpos := NewPos(offset, line, col)
 	i := 1
+	curLine, curCol := line, col+1
+	curOff := offset + 1
 
 	target := ""
 	if i < len(src) && src[i] == '(' {
 		i++
+		curOff++
+		curCol++
 		targetStart := i
 		for i < len(src) && src[i] != ')' && src[i] != '\n' {
 			b := src[i]
 			if !isTargetChar(b) {
 				return nil, 0, MessageBlockError{
-					Pos:     NewPos(0, line, col+uint(i)),
+					Pos:     NewPos(curOff, curLine, curCol),
 					Message: fmt.Sprintf("invalid target character %q in message block", rune(b)),
 				}
 			}
 			i++
+			curOff++
+			curCol++
 		}
 		if i >= len(src) || src[i] == '\n' {
 			return nil, 0, nil
@@ -222,34 +288,49 @@ func tryParseMsgBlock(src []byte, line, col uint) (*MessageBlock, int, error) {
 		}
 		target = string(src[targetStart:i])
 		i++
+		curOff++
+		curCol++
 	}
 
 	hashes := 0
 	for i < len(src) && src[i] == '#' {
 		hashes++
 		i++
+		curOff++
+		curCol++
 	}
 
 	if i >= len(src) || src[i] != '"' {
 		return nil, 0, nil
 	}
-	quotePos := NewPos(0, line, col+uint(i))
+	quotePos := NewPos(curOff, curLine, curCol)
 	i++
+	curOff++
+	curCol++
 
 	bodyStart := i
 	for {
 		if i >= len(src) {
 			return nil, 0, MessageBlockError{
-				Pos:     NewPos(uint(len(src)), line, col),
+				Pos:     NewPos(curOff, curLine, curCol),
 				Message: "unterminated message block",
 			}
 		}
+		if src[i] == '\n' {
+			curLine++
+			curCol = 1
+		} else {
+			curCol++
+		}
+		curOff++
 		if hashes == 0 {
 			if src[i] == '"' {
 				break
 			}
 			if src[i] == '\\' && i+1 < len(src) {
 				i += 2
+				curOff++
+				curCol++
 				continue
 			}
 		} else {
@@ -272,22 +353,26 @@ func tryParseMsgBlock(src []byte, line, col uint) (*MessageBlock, int, error) {
 	}
 
 	body := string(src[bodyStart:i])
-	rquotePos := NewPos(0, line, col+uint(i))
+	rquotePos := NewPos(curOff, curLine, curCol)
 	i++
+	curOff++
+	curCol++
 
 	for h := 0; h < hashes; h++ {
 		if i >= len(src) || src[i] != '#' {
 			return nil, 0, MessageBlockError{
-				Pos:     NewPos(0, line, col+uint(i)),
+				Pos:     NewPos(curOff, curLine, curCol),
 				Message: fmt.Sprintf("mismatched hash delimiter: expected %d '#' after closing quote", hashes),
 			}
 		}
 		i++
+		curOff++
+		curCol++
 	}
 
-	endPos := NewPos(0, line, col+uint(i))
+	endPos := NewPos(curOff, curLine, curCol)
 	return &MessageBlock{
-		Mpos:   NewPos(uint(len(src)), line, col),
+		Mpos:   mpos,
 		Target: target,
 		Hashes: hashes,
 		Quote:  quotePos,
@@ -301,7 +386,6 @@ func isTargetChar(b byte) bool {
 	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_' || b == '-'
 }
 
-// EscapeMessageBlock returns the Lenos message block syntax for the given body.
 func EscapeMessageBlock(body string) string {
 	if !strings.Contains(body, `"`) {
 		return "m\"" + body + "\""
