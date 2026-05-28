@@ -72,6 +72,7 @@ func ScanMsgBlocks(src []byte, baseOffset uint) (blocks []*MessageBlock, clean [
 	var depth int
 	var kwDepth int // keyword-body depth (then/do → ++, fi/done → --)
 	heredocDelim := ""
+	heredocStripTabs := false
 	var line, col uint = 1, 1
 	startOk := true
 
@@ -81,12 +82,12 @@ func ScanMsgBlocks(src []byte, baseOffset uint) (blocks []*MessageBlock, clean [
 		if b == '\n' {
 			line++
 			col = 1
-			if heredocDelim != "" && matchHeredocDelim(src, i+1, heredocDelim) {
+			if heredocDelim != "" && matchHeredocDelim(src, i+1, heredocDelim, heredocStripTabs) {
+				delimLen := len(heredocDelim)
 				heredocDelim = ""
+				heredocStripTabs = false
 				ctx = msgTop
-				i += 1 + len(heredocDelim) + 1
-				line++
-				col = 1
+				i += 1 + delimLen + 1 // newline + delimiter + trailing newline
 				startOk = true
 				continue
 			}
@@ -157,7 +158,9 @@ func ScanMsgBlocks(src []byte, baseOffset uint) (blocks []*MessageBlock, clean [
 			case '<':
 				if i+1 < len(src) && src[i+1] == '<' {
 					j := i + 2
+					stripTabs := false
 					if j < len(src) && src[j] == '-' {
+						stripTabs = true
 						j++
 					}
 					delimStart := j
@@ -170,6 +173,7 @@ func ScanMsgBlocks(src []byte, baseOffset uint) (blocks []*MessageBlock, clean [
 							d = d[1 : len(d)-1]
 						}
 						heredocDelim = d
+						heredocStripTabs = stripTabs
 						ctx = msgHeredoc
 						i = j
 						startOk = false
@@ -302,12 +306,18 @@ func matchWordAt(src []byte, pos int, s string) bool {
 	return wordEnd(src, end)
 }
 
-func matchHeredocDelim(src []byte, pos int, delim string) bool {
-	end := pos + len(delim)
+func matchHeredocDelim(src []byte, pos int, delim string, stripTabs bool) bool {
+	p := pos
+	if stripTabs {
+		for p < len(src) && src[p] == '\t' {
+			p++
+		}
+	}
+	end := p + len(delim)
 	if end > len(src) {
 		return false
 	}
-	if string(src[pos:end]) != delim {
+	if string(src[p:end]) != delim {
 		return false
 	}
 	return end >= len(src) || src[end] == '\n'
@@ -381,21 +391,14 @@ func TryParseMsgBlock(src []byte, offset uint, line, col uint) (*MessageBlock, i
 				Message: "unterminated message block",
 			}
 		}
-		if src[i] == '\n' {
-			curLine++
-			curCol = 1
-		} else {
-			curCol++
-		}
-		curOff++
 		if hashes == 0 {
 			if src[i] == '"' {
 				break
 			}
 			if src[i] == '\\' && i+1 < len(src) {
 				i += 2
-				curOff++
-				curCol++
+				curOff += 2
+				curCol += 2
 				continue
 			}
 		} else {
@@ -414,6 +417,13 @@ func TryParseMsgBlock(src []byte, offset uint, line, col uint) (*MessageBlock, i
 				}
 			}
 		}
+		if src[i] == '\n' {
+			curLine++
+			curCol = 1
+		} else {
+			curCol++
+		}
+		curOff++
 		i++
 	}
 
