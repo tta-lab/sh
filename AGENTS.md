@@ -54,7 +54,7 @@ Six public packages, each with a focused API surface:
 
 ### Parser variants
 
-`syntax.LangVariant` is a bitmask: `LangBash`, `LangPOSIX`, `LangMirBSDKorn`, `LangBats`, `LangZsh`, `LangAuto`. Set via `syntax.Variant(v)(parser)`.
+`syntax.LangVariant` is a bitmask: `LangBash`, `LangPOSIX`, `LangMirBSDKorn`, `LangBats`, `LangZsh`. Set via `syntax.Variant(v)(parser)`. `LangAuto` exists for CLI detection (filename → shebang → fallback to Bash) but is **not supported** by `Variant()`.
 
 ## Code generation
 
