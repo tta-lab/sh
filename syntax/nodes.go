@@ -24,8 +24,9 @@ type Node interface {
 type File struct {
 	Name string
 
-	Stmts []*Stmt
-	Last  []Comment
+	Stmts    []*Stmt
+	Last     []Comment
+	Messages []*MessageBlock // Lenos message blocks extracted from top-level source
 }
 
 func (f *File) Pos() Pos { return stmtsPos(f.Stmts, f.Last) }
