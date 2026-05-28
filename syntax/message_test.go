@@ -50,6 +50,12 @@ func TestScanMsgBlocks(t *testing.T) {
 			wantBash: "        \n       ",
 		},
 		{
+			name:     "multiline with hashes",
+			src:      "m##\"\nhello\n## world\"##",
+			wantMsgs: []string{"\nhello\n## world"},
+			wantBash: "                        ",
+		},
+		{
 			name:     "multiple blocks",
 			src:      "m\"first\"\nm\"second\"",
 			wantMsgs: []string{"first", "second"},
