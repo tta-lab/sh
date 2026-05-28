@@ -2,7 +2,7 @@
 
 **lensh** — shell parser for Lenos. Fork of `mvdan.cc/sh/v3`.
 
-**Why we fork:** Lenos needs the `syntax` package to parse bash and add `m"..."` / `mc"..."` message block support. We don't use `interp` (bash execution happens in Temenos sandbox), `shfmt`, `gosh`, `expand`, `pattern`, `shell`, or `moreinterp`. Those exist upstream and may be removed from this fork later.
+**Why we fork:** Lenos needs the `syntax` package to parse bash and add `m"..."` / `m#"..."#` / `m##"..."##` message block support. We don't use `interp` (bash execution happens in Temenos sandbox), `shfmt`, `gosh`, `expand`, `pattern`, `shell`, or `moreinterp`. Those exist upstream and may be removed from this fork later.
 
 ## Commands
 
