@@ -243,7 +243,7 @@ func NewParser(options ...ParserOption) *Parser {
 // Parser can be reused once it is done working.
 //
 // Note: Lenos message blocks are not extracted by Parse. Callers should
-// use [scanMsgBlocks] before Parse to extract message blocks from the
+// use [ScanMsgBlocks] before Parse to extract message blocks from the
 // source and pass the cleaned bash as the reader.
 func (p *Parser) Parse(r io.Reader, name string) (*File, error) {
 	p.reset()

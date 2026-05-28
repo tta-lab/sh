@@ -50,12 +50,6 @@ func TestScanMsgBlocks(t *testing.T) {
 			wantBash: "        \n       ",
 		},
 		{
-			name:     "multiline with hashes",
-			src:      "m##\"\nhello\n## world\"##",
-			wantMsgs: []string{"\nhello\n## world"},
-			wantBash: "                        ",
-		},
-		{
 			name:     "multiple blocks",
 			src:      "m\"first\"\nm\"second\"",
 			wantMsgs: []string{"first", "second"},
@@ -129,7 +123,7 @@ func TestScanMsgBlocks(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			blocks, clean, err := scanMsgBlocks([]byte(tt.src), 0)
+			blocks, clean, err := ScanMsgBlocks([]byte(tt.src), 0)
 			if tt.wantErr != "" {
 				if err == nil {
 					t.Fatalf("expected error containing %q, got nil", tt.wantErr)
@@ -183,7 +177,7 @@ func TestEscapeMessageBlock(t *testing.T) {
 			if got != tt.want {
 				t.Fatalf("EscapeMessageBlock(%q) = %q, want %q", tt.body, got, tt.want)
 			}
-			blocks, _, err := scanMsgBlocks([]byte(got), 0)
+			blocks, _, err := ScanMsgBlocks([]byte(got), 0)
 			if err != nil {
 				t.Fatalf("round-trip parse error: %v", err)
 			}

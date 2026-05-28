@@ -35,6 +35,12 @@ func (e MessageBlockError) Error() string {
 	return fmt.Sprintf("%d:%d: %s", e.Pos.Line(), e.Pos.Col(), e.Message)
 }
 
+// Incomplete reports whether the error was caused by an unterminated
+// message block (e.g. missing closing quote or delimiter).
+func (e MessageBlockError) Incomplete() bool {
+	return strings.Contains(e.Message, "unterminated")
+}
+
 type msgCtxState int
 
 const (
@@ -48,7 +54,14 @@ const (
 	msgHeredoc
 )
 
-func scanMsgBlocks(src []byte, baseOffset uint) (blocks []*MessageBlock, clean []byte, err error) {
+// ScanMsgBlocks extracts Lenos message blocks from shell source.
+// baseOffset is the byte offset of src in the original source (0 if src is
+// the complete source).
+//
+// It returns extracted message blocks and a cleaned copy of source where
+// message block spans are replaced with whitespace (preserving newlines).
+// Callers should parse the cleaned bash with syntax.NewParser().Parse.
+func ScanMsgBlocks(src []byte, baseOffset uint) (blocks []*MessageBlock, clean []byte, err error) {
 	if len(src) == 0 {
 		return nil, src, nil
 	}
@@ -167,7 +180,7 @@ func scanMsgBlocks(src []byte, baseOffset uint) (blocks []*MessageBlock, clean [
 			default:
 				if b == 'm' && startOk && depth == 0 {
 					offset := baseOffset + uint(i)
-					block, consumed, mErr := tryParseMsgBlock(src[i:], offset, line, col-1)
+					block, consumed, mErr := TryParseMsgBlock(src[i:], offset, line, col-1)
 					if mErr != nil {
 						return blocks, clean, mErr
 					}
@@ -253,7 +266,12 @@ func matchHeredocDelim(src []byte, pos int, delim string) bool {
 	return end >= len(src) || src[end] == '\n'
 }
 
-func tryParseMsgBlock(src []byte, offset uint, line, col uint) (*MessageBlock, int, error) {
+// TryParseMsgBlock attempts to parse a message block at src[0].
+// src[0] must be 'm'. offset is the absolute byte offset of src[0] in the
+// original source. Returns (block, bytesConsumed, nil) on success,
+// (nil, 0, nil) if src doesn't look like a message block,
+// (nil, 0, error) on malformed input.
+func TryParseMsgBlock(src []byte, offset uint, line, col uint) (*MessageBlock, int, error) {
 	if len(src) == 0 || src[0] != 'm' {
 		return nil, 0, nil
 	}
