@@ -114,6 +114,10 @@ func TestScanMsgBlocks_Rejection(t *testing.T) {
 		{name: "m in function body", src: "f() {\n  m\"not a block\"\n}"},
 		{name: "m in brace block", src: "{ m\"not a block\"; }"},
 		{name: "m in command substitution", src: "echo $(m\"not a block\")"},
+		{name: "m in if body", src: "if true; then\n  m\"not a block\"\nfi"},
+		{name: "m in for body", src: "for x in 1; do\n  m\"not a block\"\ndone"},
+		{name: "m in while body", src: "while true; do\n  m\"not a block\"\ndone"},
+		{name: "m in else body", src: "if false; then true; else\n  m\"not a block\"\nfi"},
 	}
 
 	for _, tt := range tests {

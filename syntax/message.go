@@ -70,6 +70,7 @@ func ScanMsgBlocks(src []byte, baseOffset uint) (blocks []*MessageBlock, clean [
 
 	var ctx msgCtxState
 	var depth int
+	var kwDepth int // keyword-body depth (then/do → ++, fi/done → --)
 	heredocDelim := ""
 	var line, col uint = 1, 1
 	startOk := true
@@ -178,7 +179,30 @@ func ScanMsgBlocks(src []byte, baseOffset uint) (blocks []*MessageBlock, clean [
 				startOk = false
 			case ' ', '\t', '\r':
 			default:
-				if b == 'm' && startOk && depth == 0 {
+				// Track keyword-delimited bodies (if/for/while).
+				if startOk && kwDepth >= 0 {
+					switch {
+					case matchWordAt(src, i, "then"):
+						kwDepth++
+					case matchWordAt(src, i, "do"):
+						if !matchWordAt(src, i, "done") {
+							kwDepth++
+						}
+					case matchWordAt(src, i, "done"):
+						if kwDepth > 0 {
+							kwDepth--
+						}
+					case matchWordAt(src, i, "fi"):
+						if kwDepth > 0 {
+							kwDepth--
+						}
+					case matchWordAt(src, i, "elif"):
+						if kwDepth > 0 {
+							kwDepth--
+						}
+					}
+				}
+				if b == 'm' && startOk && depth == 0 && kwDepth == 0 {
 					offset := baseOffset + uint(i)
 					block, consumed, mErr := TryParseMsgBlock(src[i:], offset, line, col-1)
 					if mErr != nil {
@@ -253,6 +277,29 @@ func ScanMsgBlocks(src []byte, baseOffset uint) (blocks []*MessageBlock, clean [
 		i++
 	}
 	return blocks, clean, nil
+}
+
+// wordEnd reports whether src[pos] is a word boundary (non-alphanumeric,
+// non-underscore, or EOF).
+func wordEnd(src []byte, pos int) bool {
+	if pos >= len(src) {
+		return true
+	}
+	b := src[pos]
+	return !((b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9') || b == '_')
+}
+
+// matchWordAt reports whether the word s appears at src[pos:] with a word
+// boundary before and after.
+func matchWordAt(src []byte, pos int, s string) bool {
+	end := pos + len(s)
+	if end > len(src) {
+		return false
+	}
+	if string(src[pos:end]) != s {
+		return false
+	}
+	return wordEnd(src, end)
 }
 
 func matchHeredocDelim(src []byte, pos int, delim string) bool {
