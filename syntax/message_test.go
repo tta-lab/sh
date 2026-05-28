@@ -12,63 +12,18 @@ func TestScanMsgBlocks_Extraction(t *testing.T) {
 		wantMsgs []string
 		wantErr  string
 	}{
-		{
-			name:     "simple",
-			src:      `m"hello"`,
-			wantMsgs: []string{"hello"},
-		},
-		{
-			name:     "single hash delimiter",
-			src:      `m#"body with "quotes"#`,
-			wantMsgs: []string{`body with "quotes`},
-		},
-		{
-			name:     "double hash delimiter",
-			src:      `m##"body with "# inner"##`,
-			wantMsgs: []string{`body with "# inner`},
-		},
-		{
-			name:     "undecorated without hash delimiter",
-			src:      `m"hello world"`,
-			wantMsgs: []string{"hello world"},
-		},
-		{
-			name:     "triple hash delimiter",
-			src:      `m###"nested "## inside"###`,
-			wantMsgs: []string{`nested "## inside`},
-		},
-		{
-			name:     "with target",
-			src:      `m(neil)"hello neil"`,
-			wantMsgs: []string{"hello neil"},
-		},
-		{
-			name:     "target with hashes",
-			src:      `m(neil)##"hello ## neil"##`,
-			wantMsgs: []string{"hello ## neil"},
-		},
-		{
-			name:     "target with hyphen and underscore",
-			src:      `m(my-agent)"msg"`,
-			wantMsgs: []string{"msg"},
-		},
-		{
-			name:     "multiline body",
-			src:      "m\"line 1\nline 2\"",
-			wantMsgs: []string{"line 1\nline 2"},
-		},
-		{
-			name:     "multiple blocks",
-			src:      "m\"first\"\nm\"second\"",
-			wantMsgs: []string{"first", "second"},
-		},
-		{
-			name:     "escaped quote inside body",
-			src:      `m"escaped \" quote"`,
-			wantMsgs: []string{`escaped \" quote`},
-		},
+		{name: "simple", src: `m"hello"`, wantMsgs: []string{"hello"}},
+		{name: "single hash delimiter", src: `m#"body with "quotes"#`, wantMsgs: []string{`body with "quotes`}},
+		{name: "double hash delimiter", src: `m##"body with "# inner"##`, wantMsgs: []string{`body with "# inner`}},
+		{name: "undecorated without hash delimiter", src: `m"hello world"`, wantMsgs: []string{"hello world"}},
+		{name: "triple hash delimiter", src: `m###"nested "## inside"###`, wantMsgs: []string{`nested "## inside`}},
+		{name: "with target", src: `m(neil)"hello neil"`, wantMsgs: []string{"hello neil"}},
+		{name: "target with hashes", src: `m(neil)##"hello ## neil"##`, wantMsgs: []string{"hello ## neil"}},
+		{name: "target with hyphen and underscore", src: `m(my-agent)"msg"`, wantMsgs: []string{"msg"}},
+		{name: "multiline body", src: "m\"line 1\nline 2\"", wantMsgs: []string{"line 1\nline 2"}},
+		{name: "multiple blocks", src: "m\"first\"\nm\"second\"", wantMsgs: []string{"first", "second"}},
+		{name: "escaped quote inside body", src: `m"escaped \" quote"`, wantMsgs: []string{`escaped \" quote`}},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			blocks, _, err := ScanMsgBlocks([]byte(tt.src), 0)
@@ -119,7 +74,6 @@ func TestScanMsgBlocks_Rejection(t *testing.T) {
 		{name: "m in while body", src: "while true; do\n  m\"not a block\"\ndone"},
 		{name: "m in else body", src: "if false; then true; else\n  m\"not a block\"\nfi"},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			blocks, _, err := ScanMsgBlocks([]byte(tt.src), 0)
@@ -144,7 +98,6 @@ func TestScanMsgBlocks_ValidTopLevel(t *testing.T) {
 		{name: "after newline after function", src: "f() { echo x; }\nm\"valid\"", wantBody: "valid"},
 		{name: "indented", src: "  m\"valid\"", wantBody: "valid"},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			blocks, _, err := ScanMsgBlocks([]byte(tt.src), 0)
@@ -170,7 +123,6 @@ func TestScanMsgBlocks_Errors(t *testing.T) {
 		{name: "unterminated", src: `m"unterminated`, wantErr: "unterminated message block"},
 		{name: "invalid target char", src: `m(in valid)"body"`, wantErr: "invalid target character"},
 	}
-
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			_, _, err := ScanMsgBlocks([]byte(tt.src), 0)
@@ -230,5 +182,30 @@ func TestMessageBlockErrorIncomplete(t *testing.T) {
 	e2 := MessageBlockError{Message: "invalid target character"}
 	if e2.Incomplete() {
 		t.Fatal("expected Incomplete() = false for non-unterminated")
+	}
+}
+
+func TestHeredocLineNumbers(t *testing.T) {
+	src := "cat <<EOF\nEOF\nm\"ok\""
+	blocks, _, err := ScanMsgBlocks([]byte(src), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks) != 1 {
+		t.Fatalf("expected 1 block, got %d", len(blocks))
+	}
+	if blocks[0].Mpos.Line() != 3 {
+		t.Fatalf("line = %d, want 3", blocks[0].Mpos.Line())
+	}
+	src2 := "cat <<EOF\nm\"bad\"\nEOF\nm\"ok\""
+	blocks2, _, err := ScanMsgBlocks([]byte(src2), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks2) != 1 {
+		t.Fatalf("expected 1 block, got %d", len(blocks2))
+	}
+	if blocks2[0].Mpos.Line() != 4 {
+		t.Fatalf("line = %d, want 4", blocks2[0].Mpos.Line())
 	}
 }
