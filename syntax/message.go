@@ -76,6 +76,7 @@ func ScanMsgBlocks(src []byte, baseOffset uint) (blocks []*MessageBlock, clean [
 	heredocPending := false // true when << was seen but ctx not yet msgHeredoc
 	var line, col uint = 1, 1
 	startOk := true
+	lineStartOk := true
 
 	for i := 0; i < len(src); {
 		b := src[i]
@@ -87,17 +88,27 @@ func ScanMsgBlocks(src []byte, baseOffset uint) (blocks []*MessageBlock, clean [
 				ctx = msgHeredoc
 				heredocPending = false
 			}
-			if heredocDelim != "" && matchHeredocDelim(src, i+1, heredocDelim, heredocStripTabs) {
-				delimLen := len(heredocDelim)
+			if heredocDelim != "" {
+				end, ok := matchHeredocDelimEnd(src, i+1, heredocDelim, heredocStripTabs)
+				if !ok {
+					startOk = true
+					lineStartOk = true
+					i++
+					continue
+				}
 				heredocDelim = ""
 				heredocStripTabs = false
 				ctx = msgTop
-				i += 1 + delimLen + 1 // newline + delimiter + trailing newline
-				line++                 // the skipped trailing newline advances to the next line
+				if end > 0 && src[end-1] == '\n' {
+					line++ // The skipped trailing newline advances to the next line.
+				}
+				i = end
 				startOk = true
+				lineStartOk = true
 				continue
 			}
 			startOk = true
+			lineStartOk = true
 			i++
 			continue
 		} else {
@@ -115,52 +126,66 @@ func ScanMsgBlocks(src []byte, baseOffset uint) (blocks []*MessageBlock, clean [
 			case '\'':
 				ctx = msgSglQuote
 				startOk = false
+				lineStartOk = false
 			case '"':
 				ctx = msgDblQuote
 				startOk = false
+				lineStartOk = false
 			case '`':
 				ctx = msgBckQuote
 				startOk = false
+				lineStartOk = false
 			case '#':
 				ctx = msgComment
 				startOk = false
+				lineStartOk = false
 			case '(':
 				depth++
 				startOk = false
+				lineStartOk = false
 			case ')':
 				if depth > 0 {
 					depth--
 				}
 				startOk = false
+				lineStartOk = false
 			case '{':
 				depth++
 				startOk = false
+				lineStartOk = false
 			case '}':
 				if depth > 0 {
 					depth--
 				}
 				startOk = false
+				lineStartOk = false
 			case '$':
 				if i+1 < len(src) {
 					switch src[i+1] {
 					case '\'':
 						ctx = msgDollarSingle
 						i += 2
+						lineStartOk = false
 						continue
 					case '"':
 						ctx = msgDollarDouble
 						i += 2
+						lineStartOk = false
 						continue
 					default:
 						startOk = false
+						lineStartOk = false
 					}
 				} else {
 					startOk = false
+					lineStartOk = false
 				}
 			case '\n':
 				startOk = true
-			case ';', '&':
+				lineStartOk = true
+			case ';', '&', '|':
 				startOk = true // end of statement
+				lineStartOk = false
 			case '<':
 				if i+1 < len(src) && src[i+1] == '<' {
 					j := i + 2
@@ -170,7 +195,7 @@ func ScanMsgBlocks(src []byte, baseOffset uint) (blocks []*MessageBlock, clean [
 						j++
 					}
 					delimStart := j
-					for j < len(src) && src[j] != '\n' && src[j] != ' ' && src[j] != '\t' {
+					for j < len(src) && !isHeredocWordEnd(src[j]) {
 						j++
 					}
 					if j > delimStart {
@@ -183,10 +208,12 @@ func ScanMsgBlocks(src []byte, baseOffset uint) (blocks []*MessageBlock, clean [
 						heredocPending = true
 						i = j
 						startOk = false
+						lineStartOk = false
 						continue
 					}
 				}
 				startOk = false
+				lineStartOk = false
 			case ' ', '\t', '\r':
 			default:
 				// Track keyword-delimited bodies (if/for/while).
@@ -219,6 +246,12 @@ func ScanMsgBlocks(src []byte, baseOffset uint) (blocks []*MessageBlock, clean [
 						return blocks, clean, mErr
 					}
 					if block != nil {
+						if !lineStartOk {
+							return blocks, clean, MessageBlockError{
+								Pos:     block.Pos(),
+								Message: "message block must start at the beginning of a physical line",
+							}
+						}
 						blocks = append(blocks, block)
 						for j := 0; j < consumed; j++ {
 							if src[i+j] != '\n' {
@@ -235,10 +268,12 @@ func ScanMsgBlocks(src []byte, baseOffset uint) (blocks []*MessageBlock, clean [
 						}
 						i += consumed
 						startOk = false
+						lineStartOk = false
 						continue
 					}
 				}
 				startOk = false
+				lineStartOk = false
 			}
 
 		case msgSglQuote:
@@ -258,6 +293,7 @@ func ScanMsgBlocks(src []byte, baseOffset uint) (blocks []*MessageBlock, clean [
 			if b == '\n' {
 				ctx = msgTop
 				startOk = true
+				lineStartOk = true
 			}
 
 		case msgBckQuote:
@@ -312,7 +348,16 @@ func matchWordAt(src []byte, pos int, s string) bool {
 	return wordEnd(src, end)
 }
 
-func matchHeredocDelim(src []byte, pos int, delim string, stripTabs bool) bool {
+func isHeredocWordEnd(b byte) bool {
+	switch b {
+	case '\n', ' ', '\t', ';', '&', '|':
+		return true
+	default:
+		return false
+	}
+}
+
+func matchHeredocDelimEnd(src []byte, pos int, delim string, stripTabs bool) (int, bool) {
 	p := pos
 	if stripTabs {
 		for p < len(src) && src[p] == '\t' {
@@ -321,12 +366,18 @@ func matchHeredocDelim(src []byte, pos int, delim string, stripTabs bool) bool {
 	}
 	end := p + len(delim)
 	if end > len(src) {
-		return false
+		return 0, false
 	}
 	if string(src[p:end]) != delim {
-		return false
+		return 0, false
 	}
-	return end >= len(src) || src[end] == '\n'
+	if end < len(src) && src[end] != '\n' {
+		return 0, false
+	}
+	if end < len(src) {
+		end++
+	}
+	return end, true
 }
 
 // TryParseMsgBlock attempts to parse a message block at src[0].

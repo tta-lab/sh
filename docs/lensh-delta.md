@@ -40,13 +40,49 @@ func EscapeMessageBlock(body string) string
 
 Only `m` variant; `mc` is not supported.
 
+## Protocol scope
+
+Lenos message blocks are an agent protocol, not a general-purpose Bash
+extension. The supported shape is intentionally narrow:
+
+- `m` must be the first non-whitespace token on a physical line.
+- The line must be top-level source, not inside a heredoc body, quote,
+  comment, function body, subshell, command substitution, or keyword body.
+- Same-line statement separators are outside the protocol contract. Agents
+  should emit a new physical line before every message block. A message-block
+  form found at a same-line statement boundary is a protocol error, not a
+  silently ignored shell command.
+
+Supported:
+
+```sh
+echo "working"
+m"Done."
+
+  m"Indented top-level message."
+```
+
+Unsupported:
+
+```sh
+echo "working"; m"Done."
+cat <<EOF; m"Same physical line as heredoc setup."
+body
+EOF
+```
+
+The scanner reports same-line message-block forms as errors so agents can
+repair the response instead of accidentally losing prose.
+
 ## Top-level enforcement
 
-Message blocks are only recognized at statement start (after newline, `;`, `&`)
-when both `depth` (brace/paren nesting) and `kwDepth` (keyword-body depth) are zero.
+Message blocks are recognized at statement start when both `depth`
+(brace/paren nesting) and `kwDepth` (keyword-body depth) are zero. The protocol
+contract is stricter than Bash statement-start grammar: message blocks should
+start their own physical line.
 
 **Recognized contexts (block extracted):**
-- Top-level after `;`, `&`, newline
+- Top-level physical lines
 - After closing `}` of a function
 - Indented top-level lines
 
@@ -58,11 +94,22 @@ when both `depth` (brace/paren nesting) and `kwDepth` (keyword-body depth) are z
 - Function bodies, brace blocks (`{...}`)
 - If/for/while/case bodies (`then`/`do` → `fi`/`done` keyword tracking)
 
-## Known limitations
+## Non-goals and unsupported shell corners
 
-- A message block on the same line as a `<<HEREDOC` delimiter is not extracted.
-  The scanner defers heredoc entry to the first newline; the rest of the line
-  is consumed as part of the heredoc command.
+- Same-line message blocks after `;`, `&`, `|`, or heredoc setup are not part
+  of the protocol. Use a new physical line. Message-block syntax after `;`,
+  `&`, or heredoc setup is reported as an error.
+- Full Bash heredoc grammar is not a goal. The scanner only needs to keep
+  heredoc bodies opaque and preserve useful line/offset accounting for later
+  diagnostics.
+- `<<-` is supported only to avoid misreading tab-indented heredoc bodies as
+  message blocks. It is not a protocol feature agents should prefer.
+- Multiple pending heredocs on one command line are not a protocol target.
+  Agents should use simple heredocs or separate commands when they need file
+  writes.
+- Message blocks embedded in command substitutions, process substitutions,
+  arithmetic contexts, arrays, aliases, or dynamically generated shell are not
+  recognized.
 - No structured `SyntaxDiagnostic` types — those belong in the Lenos runtime,
   not the shell fork.
 

@@ -60,7 +60,6 @@ func TestScanMsgBlocks_Rejection(t *testing.T) {
 		{name: "m in single quotes", src: `echo 'm"not a block"'`},
 		{name: "m in double quotes", src: `echo "m\"not a block\""`},
 		{name: "m in backticks", src: "echo `m\"not a block\"`"},
-		{name: "m after pipe", src: "cat file | m\"not at start\""},
 		{name: "m in dollar-single quotes", src: `echo $'m"not a block"'`},
 		{name: "m in dollar-double quotes", src: `echo $"m\"not a block\""`},
 		{name: "m in heredoc", src: "cat <<EOF\nm\"not a block\"\nEOF\necho done"},
@@ -93,8 +92,6 @@ func TestScanMsgBlocks_ValidTopLevel(t *testing.T) {
 		src      string
 		wantBody string
 	}{
-		{name: "after semicolon", src: "echo done; m\"valid\"", wantBody: "valid"},
-		{name: "after ampersand", src: "echo done & m\"valid\"", wantBody: "valid"},
 		{name: "after newline after function", src: "f() { echo x; }\nm\"valid\"", wantBody: "valid"},
 		{name: "indented", src: "  m\"valid\"", wantBody: "valid"},
 	}
@@ -122,6 +119,10 @@ func TestScanMsgBlocks_Errors(t *testing.T) {
 	}{
 		{name: "unterminated", src: `m"unterminated`, wantErr: "unterminated message block"},
 		{name: "invalid target char", src: `m(in valid)"body"`, wantErr: "invalid target character"},
+		{name: "after semicolon", src: `echo done; m"body"`, wantErr: "message block must start"},
+		{name: "after ampersand", src: `echo done & m"body"`, wantErr: "message block must start"},
+		{name: "after pipe", src: `cat file | m"body"`, wantErr: "message block must start"},
+		{name: "same line as heredoc setup", src: "cat <<EOF; m\"body\"\nbody\nEOF", wantErr: "message block must start"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -207,5 +208,16 @@ func TestHeredocLineNumbers(t *testing.T) {
 	}
 	if blocks2[0].Mpos.Line() != 4 {
 		t.Fatalf("line = %d, want 4", blocks2[0].Mpos.Line())
+	}
+	src3 := "cat <<-EOF\nbody\n\tEOF\nm\"ok\""
+	blocks3, _, err := ScanMsgBlocks([]byte(src3), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks3) != 1 {
+		t.Fatalf("expected 1 block, got %d", len(blocks3))
+	}
+	if blocks3[0].Mpos.Line() != 4 {
+		t.Fatalf("line = %d, want 4", blocks3[0].Mpos.Line())
 	}
 }
