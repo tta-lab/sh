@@ -62,6 +62,8 @@ Non-Bash `LangVariant`s (`LangPOSIX`, `LangMirBSDKorn`, `LangBats`, `LangZsh`) e
 
 Module path: `mvdan.cc/sh/v3`. Upstream: `github.com/mvdan/sh`. Keep the fork delta narrow — our changes are in `syntax/` for message block support. Track upstream releases for security/bugfix backports.
 
+See `docs/lensh-delta.md` for a detailed record of the fork changes.
+
 ## Gotchas
 
 - **`.gitattributes` disables text normalization** (`* -text`). Don't add CRLF line endings.
