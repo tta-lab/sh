@@ -198,5 +198,6 @@ func ExampleDebugPrint() {
 	// .  .  }
 	// .  }
 	// .  Last: []syntax.Comment (len = 0) {}
+	// .  Messages: []*syntax.MessageBlock (len = 0) {}
 	// }
 }

@@ -241,6 +241,10 @@ func NewParser(options ...ParserOption) *Parser {
 //
 // Parse can be called more than once, but not concurrently. That is, a
 // Parser can be reused once it is done working.
+//
+// Note: Lenos message blocks are not extracted by Parse. Callers should
+// use [ScanMsgBlocks] before Parse to extract message blocks from the
+// source and pass the cleaned bash as the reader.
 func (p *Parser) Parse(r io.Reader, name string) (*File, error) {
 	p.reset()
 	p.f = &File{Name: name}
